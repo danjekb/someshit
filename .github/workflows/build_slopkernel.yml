@@ -1,4 +1,4 @@
-name: Build & Release SlopKernel (A52s 5G)
+name: Build SlopKernel (Samsung SM7325 - Lineage)
 
 on:
   workflow_dispatch:
@@ -7,14 +7,14 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Wymagane do tworzenia i usuwania wydań
+      contents: write
 
     steps:
     - name: Checkout Kernel Source
       uses: actions/checkout@v4
       with:
-        repository: A7mdwassa/kernel_samsung_ascendia_sm7325
-        ref: aosp-ksu
+        repository: danjekb/android_kernel_samsung_sm7325
+        ref: master
         path: kernel
 
     - name: Checkout LineageOS Clang
@@ -50,7 +50,12 @@ jobs:
 
         cd kernel
         mkdir -p out
-        make O=out vendor/a52sxq_eur_open_defconfig
+        
+        # Używamy ścieżki: arch/arm64/configs/vendor/lineage-a52sxq_defconfig
+        # W komendzie make O=out podajemy ścieżkę względem folderu configs/
+        make O=out vendor/lineage-a52sxq_defconfig
+        
+        # Kompilacja SlopKernel z pełnym LLVM
         make -j$(nproc --all) O=out \
             CC=clang \
             LLVM=1 \
@@ -64,10 +69,12 @@ jobs:
 
     - name: Prepare and Sign AnyKernel3 ZIP
       run: |
+        # Kopiowanie plików wynikowych
         cp kernel/out/arch/arm64/boot/Image anykernel/
-        cp kernel/out/arch/arm64/boot/dtbo.img anykernel/
+        [ -f kernel/out/arch/arm64/boot/dtbo.img ] && cp kernel/out/arch/arm64/boot/dtbo.img anykernel/
         
         cd anykernel
+        # Konfiguracja AnyKernel3
         sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
         sed -i 's/block=\/dev\/block\/td/block=auto/g' anykernel.sh
         
@@ -89,9 +96,10 @@ jobs:
         name: SlopKernel for A52s 5G (${{ env.RELEASE_TAG }})
         body: |
           ### SlopKernel Build
-          - **Kernel Source:** [A7mdwassa/kernel_samsung_ascendia_sm7325](https://github.com/A7mdwassa/kernel_samsung_ascendia_sm7325)
-          - **Branch:** `aosp-ksu`
-          - **Status:** Signed & Flashable ZIP
+          - **Kernel Source:** [danjekb/android_kernel_samsung_sm7325](https://github.com/danjekb/android_kernel_samsung_sm7325)
+          - **Branch:** `master`
+          - **Defconfig:** `vendor/lineage-a52sxq_defconfig`
+          - **Compiler:** Clang r416183b
         files: ${{ env.ZIP_PATH }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
