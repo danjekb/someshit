@@ -1,0 +1,106 @@
+name: Build & Release SlopKernel (A52s 5G)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Wymagane do tworzenia i usuwania wydań
+
+    steps:
+    - name: Checkout Kernel Source
+      uses: actions/checkout@v4
+      with:
+        repository: A7mdwassa/kernel_samsung_ascendia_sm7325
+        ref: aosp-ksu
+        path: kernel
+
+    - name: Checkout LineageOS Clang
+      uses: actions/checkout@v4
+      with:
+        repository: LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b
+        path: clang
+
+    - name: Checkout AnyKernel3
+      uses: actions/checkout@v4
+      with:
+        repository: osm0sis/AnyKernel3
+        path: anykernel
+
+    - name: Install Build Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev python3 binutils-aarch64-linux-gnu libarchive-tools zip default-jre
+
+    - name: Download ZipSigner
+      run: |
+        curl -sLo zipsigner.jar https://github.com/Magisk-Modules-Repo/zipsigner/raw/master/bin/zipsigner.jar
+
+    - name: Build Kernel
+      run: |
+        CLANG_BIN=$(pwd)/clang/bin
+        export PATH=$CLANG_BIN:$PATH
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export CLANG_TRIPLE=aarch64-linux-gnu-
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+
+        cd kernel
+        mkdir -p out
+        make O=out vendor/a52sxq_eur_open_defconfig
+        make -j$(nproc --all) O=out \
+            CC=clang \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip
+
+    - name: Prepare and Sign AnyKernel3 ZIP
+      run: |
+        cp kernel/out/arch/arm64/boot/Image anykernel/
+        cp kernel/out/arch/arm64/boot/dtbo.img anykernel/
+        
+        cd anykernel
+        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
+        sed -i 's/block=\/dev\/block\/td/block=auto/g' anykernel.sh
+        
+        DATE=$(date +"%Y%m%d-%H%M")
+        TAG="SlopKernel-$DATE"
+        ZIP_NAME="SlopKernel-A52s-KSU-SIGNED-$DATE.zip"
+        
+        zip -r9 ../unsigned.zip * -x .git* README.md
+        cd ..
+        java -jar zipsigner.jar unsigned.zip "$ZIP_NAME"
+        
+        echo "RELEASE_TAG=$TAG" >> $GITHUB_ENV
+        echo "ZIP_PATH=$ZIP_NAME" >> $GITHUB_ENV
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ env.RELEASE_TAG }}
+        name: SlopKernel for A52s 5G (${{ env.RELEASE_TAG }})
+        body: |
+          ### SlopKernel Build
+          - **Kernel Source:** [A7mdwassa/kernel_samsung_ascendia_sm7325](https://github.com/A7mdwassa/kernel_samsung_ascendia_sm7325)
+          - **Branch:** `aosp-ksu`
+          - **Status:** Signed & Flashable ZIP
+        files: ${{ env.ZIP_PATH }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Cleanup Old Releases
+      uses: dev-drprasad/delete-older-releases@v0.3.0
+      with:
+        keep_latest: 3
+        delete_tags: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
